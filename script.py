@@ -7,9 +7,11 @@ import bisect
 import datetime
 import json
 import logging
+from pathlib import Path
 
 import ass
 import click
+import pysrt
 
 from curve_adjustment import modify
 
@@ -23,7 +25,7 @@ LOGGER = logging.getLogger(__name__)
 logging.getLogger("curve_adjustment").setLevel(logging.INFO)
 
 
-def get_seconds(time_str: str):
+def get_seconds(time_str: str) -> float:
     """
     00:10:12 -> 612
     """
@@ -56,6 +58,10 @@ def get_anchor(start_times, anchors):
     return result
 
 
+def get_sub_seconds(sub_time) -> float:
+    return sub_time.hours * 3600 + sub_time.minutes * 60 + sub_time.seconds + sub_time.milliseconds / 1000
+
+
 @click.command()
 @click.option("--source", help="input ass path")
 @click.option("--target", help="output ass path", default="output.ass")
@@ -72,22 +78,38 @@ def main(source, target, config):
         }
 
     """
-    with open(source) as source_file:
-        sections = ass.parse(source_file)
-
-    subtitle_start_seconds = [
-        dialog.start.total_seconds()
-        for dialog in sections.events
-    ]
-    subtitle_end_seconds = [
-        dialog.end.total_seconds()
-        for dialog in sections.events
-    ]
-
+    source = Path(source)
     with open(config) as anchor_file:
         anchors = json.load(anchor_file)
         if "anchors" in anchors:
             anchors = anchors["anchors"]
+
+    if source.suffix.lower() == ".ass":
+
+        with open(source) as source_file:
+            sections = ass.parse(source_file)
+
+        subtitle_start_seconds = [
+            dialog.start.total_seconds()
+            for dialog in sections.events
+        ]
+        subtitle_end_seconds = [
+            dialog.end.total_seconds()
+            for dialog in sections.events
+        ]
+
+    elif source.suffix.lower() == ".srt":
+
+        subs = pysrt.open(source, encoding="utf8")
+
+        subtitle_start_seconds = [
+            get_sub_seconds(sub.start)
+            for sub in subs
+        ]
+        subtitle_end_seconds = [
+            get_sub_seconds(sub.end)
+            for sub in subs
+        ]
 
     start_anchor = get_anchor(
         subtitle_start_seconds, anchors
@@ -98,20 +120,31 @@ def main(source, target, config):
     LOGGER.info("start_anchor: %s", start_anchor)
     LOGGER.info("end_anchor: %s", end_anchor)
 
-    start_mod = modify(subtitle_start_seconds, start_anchor)
-    # breakpoint()
-    end_mod = modify(subtitle_end_seconds, end_anchor)
 
-    LOGGER.info("start_mod: %s", start_mod)
 
-    for index, (start_second, end_second) in enumerate(zip(
-        start_mod, end_mod
-    )):
-        sections.events[index].start = datetime.timedelta(seconds=start_second)
-        sections.events[index].end = datetime.timedelta(seconds=end_second)
+    if source.suffix.lower() == ".ass":
+        start_mod = modify(subtitle_start_seconds, start_anchor)
+        end_mod = modify(subtitle_end_seconds, end_anchor)
+        LOGGER.info("start_mod: %s", start_mod)
+        for index, (start_second, end_second) in enumerate(zip(
+            start_mod, end_mod
+        )):
+            sections.events[index].start = datetime.timedelta(seconds=start_second)
+            sections.events[index].end = datetime.timedelta(seconds=end_second)
 
-    with open(target, 'w') as target_file:
-        sections.dump_file(target_file)
+        with open(target, 'w') as target_file:
+            sections.dump_file(target_file)
+
+    elif source.suffix.lower() == ".srt":
+        start_mod = modify(subtitle_start_seconds, start_anchor,
+                           output_format="delta")
+        end_mod = modify(subtitle_end_seconds, end_anchor,
+                         output_format="delta")
+        LOGGER.info("start_mod: %s", start_mod)
+        for index, start_delta in enumerate(start_mod):
+            subs[index].shift(seconds=start_delta)
+
+        subs.save(target)
 
 
 if __name__ == "__main__":

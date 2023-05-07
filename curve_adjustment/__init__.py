@@ -13,11 +13,12 @@ import logging
 LOGGER = logging.getLogger(__name__)
 
 
-def modify(origin: list, anchors: dict) -> list:
+def modify(origin: list, anchors: dict, output_format="value") -> list:
     """
     Given a sorted data list and some modify in specifix position,
     this function will apply the modify linearly.
 
+    :params output_format: default value, return target value, return delta if output_format is 'delta'
     Examples:
 
            y
@@ -85,6 +86,8 @@ def modify(origin: list, anchors: dict) -> list:
 
     LOGGER.debug("mod = %s", mod)
 
+    if output_format == 'delta':
+        return mod
     return [
         value + mod[i]
         for i, value in enumerate(origin)
