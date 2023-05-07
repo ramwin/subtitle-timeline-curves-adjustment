@@ -6,11 +6,21 @@
 import bisect
 import datetime
 import json
+import logging
 
 import ass
 import click
 
 from curve_adjustment import modify
+
+
+logging.basicConfig(
+    level=logging.DEBUG,
+    handlers=[logging.StreamHandler()],
+    format="%(asctime)s %(pathname)s[line:%(lineno)d] %(levelname)s %(message)s",
+)
+LOGGER = logging.getLogger(__name__)
+logging.getLogger("curve_adjustment").setLevel(logging.INFO)
 
 
 def get_seconds(time_str: str):
@@ -46,10 +56,11 @@ def get_anchor(start_times, anchors):
     return result
 
 
+@click.command()
 @click.option("--source", help="input ass path")
 @click.option("--target", help="output ass path", default="output.ass")
-@click.option("--config", help="anchors json path")
-def main(source, target, anchorconfig):
+@click.option("--config", help="anchors json path", default="config.json")
+def main(source, target, config):
     """
     convert a ass file with anchor config
     anchor config:
@@ -73,7 +84,7 @@ def main(source, target, anchorconfig):
         for dialog in sections.events
     ]
 
-    with open(anchorconfig) as anchor_file:
+    with open(config) as anchor_file:
         anchors = json.load(anchor_file)
         if "anchors" in anchors:
             anchors = anchors["anchors"]
@@ -84,13 +95,24 @@ def main(source, target, anchorconfig):
     end_anchor = get_anchor(
         subtitle_end_seconds, anchors
     )
+    LOGGER.info("start_anchor: %s", start_anchor)
+    LOGGER.info("end_anchor: %s", end_anchor)
+
+    start_mod = modify(subtitle_start_seconds, start_anchor)
+    # breakpoint()
+    end_mod = modify(subtitle_end_seconds, end_anchor)
+
+    LOGGER.info("start_mod: %s", start_mod)
 
     for index, (start_second, end_second) in enumerate(zip(
-        modify(subtitle_start_seconds, start_anchor),
-        modify(subtitle_end_seconds, end_anchor),
+        start_mod, end_mod
     )):
-        sections.events[index].start = datetime.timedelta(start_second)
-        sections.events[index].end = datetime.timedelta(end_second)
+        sections.events[index].start = datetime.timedelta(seconds=start_second)
+        sections.events[index].end = datetime.timedelta(seconds=end_second)
 
     with open(target, 'w') as target_file:
         sections.dump_file(target_file)
+
+
+if __name__ == "__main__":
+    main()
